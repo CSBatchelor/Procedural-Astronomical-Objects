@@ -18,14 +18,17 @@ class_name AstronomicalObject
 		base_resolution = value
 		regenerate_mesh()
 
-@onready var mesh_instance_3d : MeshInstance3D = $MeshInstance3D
-
 var vertex_lookup : Dictionary[Vector3, int] = {}
+var mesh_rid : RID
+var instance_rid : RID
 
 func _ready() -> void:
 	regenerate_mesh()
 	
 func regenerate_mesh() -> void:
+	if not is_inside_tree():
+		return
+		
 	var mesh_arrays := generate_mesh_arrays()
 	# call_deferred delays apply_mesh_arrays until the end of the current frame.
 	# This avoids issues when regenerate_mesh is called from a setter (like base_resolution),
@@ -256,12 +259,38 @@ func generate_plane(
 				vertex_lookup[needed_verticies[2]],
 				vertex_lookup[needed_verticies[3]]
 			]))
-	
+			
 	mesh_arrays[Mesh.ARRAY_VERTEX] = vertex_array
 	mesh_arrays[Mesh.ARRAY_NORMAL] = normal_array
 	mesh_arrays[Mesh.ARRAY_INDEX] = index_array
 	
 func apply_mesh_arrays(mesh_arrays: Array) -> void:
-	var new_mesh := ArrayMesh.new()
-	new_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays)
-	mesh_instance_3d.set_mesh(new_mesh)
+	create_or_clear_mesh()
+	create_instance_once()
+	
+	RenderingServer.mesh_add_surface_from_arrays(
+		mesh_rid,
+		RenderingServer.PRIMITIVE_TRIANGLES,
+		mesh_arrays
+	)
+
+	RenderingServer.instance_set_transform(instance_rid, Transform3D(Basis.IDENTITY, Vector3.ZERO))
+	
+func create_or_clear_mesh() -> void:
+	if not mesh_rid.is_valid():
+		mesh_rid = RenderingServer.mesh_create()
+	else:
+		RenderingServer.mesh_clear(mesh_rid)
+		
+func create_instance_once() -> void:
+	if not instance_rid.is_valid():
+		instance_rid = RenderingServer.instance_create()
+		RenderingServer.instance_set_base(instance_rid, mesh_rid)
+		RenderingServer.instance_set_scenario(instance_rid, get_world_3d().scenario)
+		
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		if mesh_rid.is_valid():
+			RenderingServer.free_rid(mesh_rid)
+		if instance_rid.is_valid():
+			RenderingServer.free_rid(instance_rid)

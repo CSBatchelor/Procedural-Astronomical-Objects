@@ -4,5 +4,3 @@
 
 [node name="AstronomicalObject" type="Node3D"]
 script = ExtResource("1_a6sn1")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
