@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://c6rl4d7jnw1s5"]
+
+[ext_resource type="Script" uid="uid://coctu5kqhn8bq" path="res://astronomical_object.gd" id="1_a6sn1"]
+
+[node name="AstronomicalObject" type="Node3D"]
+script = ExtResource("1_a6sn1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
