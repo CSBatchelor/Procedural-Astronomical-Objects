@@ -4,3 +4,6 @@
 
 [node name="AstronomicalObject" type="Node3D"]
 script = ExtResource("1_a6sn1")
+base_resolution = 1
+max_resolution = 3
+focus_point = Vector3(0, 1, 1)
