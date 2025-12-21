@@ -13,22 +13,11 @@ class_name AstronomicalObject
 ##
 ## As an @tool script, the mesh regenerates live in the editor when properties change.
 
-@export var chunk_resolution := 3 :
+@export var data : AstronomicalObjectData :
 	set(value):
-		chunk_resolution = clamp(value, 0, base_resolution)
-		regenerate_meshes()
-@export var base_resolution := 3 :
-	set(value):
-		base_resolution = clamp(value, chunk_resolution, max_resolution)
-		regenerate_meshes()
-@export var max_resolution := 6 :
-	set(value):
-		max_resolution = max(value, chunk_resolution)
-		regenerate_meshes()
-@export var focus_point := Vector3.ZERO :
-	set(value):
-		focus_point = value
-		regenerate_meshes()
+		data = value
+		if data != null and not data.is_connected("changed", regenerate_meshes):
+			data.connect("changed", regenerate_meshes)
 
 var material : Material = load("res://astronomical_object_shader_material.tres")
 var chunks_lookup : Dictionary[String, MeshInstance3D] = {}
@@ -126,8 +115,8 @@ func generate_quadtree_plane(normal := Vector3.ZERO) -> void:
 	var size := normal/2 + binormal + tangent
 	var bounds := AABB(pos, size)
 	var starting_depth := 0
-	var min_depth := base_resolution
-	var max_depth := max_resolution
+	var min_depth := data.base_resolution
+	var max_depth := data.max_resolution
 	var quadtree_chunk := QuadtreeChunk.new(
 		normal,
 		binormal,
@@ -138,7 +127,7 @@ func generate_quadtree_plane(normal := Vector3.ZERO) -> void:
 		max_depth
 	)
 	
-	quadtree_chunk.subdivide(focus_point)
+	quadtree_chunk.subdivide(data.focus_point)
 	
 	visualize_quadtree(quadtree_chunk)
 
@@ -232,7 +221,7 @@ class QuadtreeChunk :
 		
 		for child_position in child_positions:
 			var child_center_3d := child_position + binormal * quarter_size + tangent * quarter_size
-			var distance := child_center_3d.normalized().distance_to(focus_point.normalized())
+			var distance := child_center_3d.normalized().distance_to(focus_point)
 			var child_bounds := AABB(child_position, half_extents)
 			var new_child := QuadtreeChunk.new(
 				normal,
@@ -259,7 +248,7 @@ class QuadtreeChunk :
 			identifier = identifier + " " + new_child.identifier
 
 func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
-	if quadtree_chunk.depth < chunk_resolution:
+	if quadtree_chunk.depth < data.chunk_resolution:
 		# Keep going until we are at the chunk resolution
 		for child in quadtree_chunk.children:
 			visualize_quadtree(child)

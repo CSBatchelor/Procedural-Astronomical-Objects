@@ -1,10 +1,14 @@
-[gd_scene load_steps=2 format=3 uid="uid://c6rl4d7jnw1s5"]
+[gd_scene load_steps=4 format=3 uid="uid://c6rl4d7jnw1s5"]
 
 [ext_resource type="Script" uid="uid://coctu5kqhn8bq" path="res://astronomical_object.gd" id="1_a6sn1"]
+[ext_resource type="Script" uid="uid://cjdi48ewc8mbw" path="res://astronomical_object_data.gd" id="2_odng8"]
+
+[sub_resource type="Resource" id="Resource_rfh0j"]
+script = ExtResource("2_odng8")
+chunk_resolution = 0
+focus_point = Vector3(0.57735026, 0.57735026, 0.57735026)
+metadata/_custom_type_script = "uid://cjdi48ewc8mbw"
 
 [node name="AstronomicalObject" type="Node3D"]
 script = ExtResource("1_a6sn1")
-chunk_resolution = 0
-base_resolution = 2
-max_resolution = 8
-focus_point = Vector3(1, 1, 1)
+data = SubResource("Resource_rfh0j")
