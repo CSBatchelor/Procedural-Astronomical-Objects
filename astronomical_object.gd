@@ -31,7 +31,6 @@ class_name AstronomicalObject
 		regenerate_meshes()
 
 var material : Material = load("res://astronomical_object_shader_material.tres")
-var vertex_lookup : Dictionary[Vector3, int] = {}
 var chunks_lookup : Dictionary[String, MeshInstance3D] = {}
 var current_chunks_lookup : Dictionary[String, bool] = {}
 
@@ -278,7 +277,9 @@ func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
 	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array()
 	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array()
 	
-	construct_chunk_mesh(quadtree_chunk, arrays)
+	var vertex_lookup : Dictionary[Vector3, int] = {}
+	
+	construct_chunk_mesh(quadtree_chunk, arrays, vertex_lookup)
 	
 	var array_mesh := ArrayMesh.new()
 	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -287,12 +288,16 @@ func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
 	chunks_lookup[quadtree_chunk.identifier] = mesh_instance
 	add_child(mesh_instance)
 
-func construct_chunk_mesh(quadtree_chunk : QuadtreeChunk, arrays: Array) -> void:
+func construct_chunk_mesh(
+	quadtree_chunk : QuadtreeChunk,
+	arrays: Array,
+	vertex_lookup : Dictionary[Vector3, int]
+) -> void:
 	# If this chunk has children, we only want to render the children
 	# as they make up the geometry of the parent chunk.
 	if quadtree_chunk.children:
 		for child in quadtree_chunk.children:
-			construct_chunk_mesh(child, arrays)
+			construct_chunk_mesh(child, arrays, vertex_lookup)
 		return
 
 	var index_offset := (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
@@ -301,6 +306,7 @@ func construct_chunk_mesh(quadtree_chunk : QuadtreeChunk, arrays: Array) -> void
 	var pos := quadtree_chunk.bounds.position
 	var size_x := binormal * quadtree_chunk.bounds.size.dot(binormal)
 	var size_y := tangent * quadtree_chunk.bounds.size.dot(tangent)
+	
 	# Each subdivision is a quad made of 4 vertices and 2 triangles:
 	#
 	#        tangent
@@ -319,16 +325,49 @@ func construct_chunk_mesh(quadtree_chunk : QuadtreeChunk, arrays: Array) -> void
 	# Normalizing the vectors curves the plane so the planes form a sphere,
 	# then halfing it so the sphere has a diameter of 1 meter.
 	#
-	var verts := PackedVector3Array([
+	var needed_verts := PackedVector3Array([
 		pos.normalized() * 0.5,
 		(pos + size_y).normalized() * 0.5,
 		(pos + size_x + size_y).normalized() * 0.5,
 		(pos + size_x).normalized() * 0.5,
 	])
 	
+	# vertex_lookup prevents duplicate vertices at shared corners:
+	#
+	#   Without deduplication:           With deduplication (vertex_lookup):
+	#
+	#     A───B C───D                      A───B───C
+	#     │ 1 │ │ 2 │                      │ 1 │ 2 │
+	#     E───F G───H      each quad       D───E───F    shared vertices
+	#     I───J K───L      has 4 verts     │ 3 │ 4 │    are reused
+	#     │ 3 │ │ 4 │                      G───H───I
+	#     M───N O───P
+	#
+	#     16 vertices total                9 vertices total
+	#     (many duplicates!)               (no duplicates)
+	#
+	#   Example: vertex E above is shared by quads 1, 2, 3, and 4.
+	#   Without lookup, we'd create it 4 times. With lookup, just once.
+	#
+	var verts := PackedVector3Array()
+	for vert in needed_verts:
+		if vertex_lookup.has(vert):
+			continue
+		
+		vertex_lookup[vert] = index_offset
+		index_offset += 1 
+		verts.append(vert)
+	
 	var indicies := PackedInt32Array([
-		index_offset, index_offset + 1, index_offset + 2, # First triangle
-		index_offset, index_offset + 2, index_offset + 3, # Second triangle
+		# First triangle
+		vertex_lookup[needed_verts[0]], 
+		vertex_lookup[needed_verts[1]],
+		vertex_lookup[needed_verts[2]], 
+		
+		# Second triangle
+		vertex_lookup[needed_verts[0]],
+		vertex_lookup[needed_verts[2]], 
+		vertex_lookup[needed_verts[3]] 
 	])
 
 	arrays[Mesh.ARRAY_VERTEX] = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array) + verts
