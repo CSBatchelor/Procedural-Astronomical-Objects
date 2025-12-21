@@ -13,33 +13,35 @@ class_name AstronomicalObject
 ##
 ## As an @tool script, the mesh regenerates live in the editor when properties change.
 
+@export var chunk_resolution := 3 :
+	set(value):
+		chunk_resolution = clamp(value, 0, base_resolution)
+		regenerate_meshes()
 @export var base_resolution := 3 :
 	set(value):
-		base_resolution = value
-		regenerate_mesh()
+		base_resolution = clamp(value, chunk_resolution, max_resolution)
+		regenerate_meshes()
 @export var max_resolution := 6 :
 	set(value):
-		max_resolution = value
-		regenerate_mesh()
+		max_resolution = max(value, chunk_resolution)
+		regenerate_meshes()
 @export var focus_point := Vector3.ZERO :
 	set(value):
 		focus_point = value
-		regenerate_mesh()
+		regenerate_meshes()
 
 var material : Material = load("res://astronomical_object_shader_material.tres")
 var vertex_lookup : Dictionary[Vector3, int] = {}
-var mesh_rid : RID
-var instance_rid : RID
 var chunks_lookup : Dictionary[String, MeshInstance3D] = {}
 var current_chunks_lookup : Dictionary[String, bool] = {}
 
 func _ready() -> void:
-	regenerate_mesh()
-	
-func regenerate_mesh() -> void:
+	regenerate_meshes()
+
+func regenerate_meshes() -> void:
 	if not is_inside_tree():
 		return
-	
+		
 	# This lookup will be repopulated each render
 	# If the chunk is drawn, it will be in the lookup.
 	current_chunks_lookup = {}
@@ -124,9 +126,18 @@ func generate_quadtree_plane(normal := Vector3.ZERO) -> void:
 	var pos := normal/2 - binormal/2 - tangent/2
 	var size := normal/2 + binormal + tangent
 	var bounds := AABB(pos, size)
-	var starting_depth := -(abs(base_resolution) as int)
-	var max_depth := max_resolution - starting_depth 
-	var quadtree_chunk := QuadtreeChunk.new(normal, binormal, tangent, bounds, starting_depth, max_depth)
+	var starting_depth := 0
+	var min_depth := base_resolution
+	var max_depth := max_resolution
+	var quadtree_chunk := QuadtreeChunk.new(
+		normal,
+		binormal,
+		tangent,
+		bounds,
+		starting_depth,
+		min_depth,
+		max_depth
+	)
 	
 	quadtree_chunk.subdivide(focus_point)
 	
@@ -160,6 +171,7 @@ class QuadtreeChunk :
 	var bounds : AABB
 	var children : Array[QuadtreeChunk] = []
 	var depth : int
+	var min_chunk_depth : int
 	var max_chunk_depth : int
 	var identifier : String
 	
@@ -169,6 +181,7 @@ class QuadtreeChunk :
 		_tangent : Vector3,
 		_bounds : AABB,
 		_depth : int,
+		_min_chunk_depth : int,
 		_max_chunk_depth : int
 	) -> void:
 		normal = _normal
@@ -176,6 +189,7 @@ class QuadtreeChunk :
 		tangent = _tangent
 		bounds = _bounds
 		depth = _depth
+		min_chunk_depth = _min_chunk_depth
 		max_chunk_depth = _max_chunk_depth
 		identifier = generate_identifier()
 		
@@ -221,8 +235,16 @@ class QuadtreeChunk :
 			var child_center_3d := child_position + binormal * quarter_size + tangent * quarter_size
 			var distance := child_center_3d.normalized().distance_to(focus_point.normalized())
 			var child_bounds := AABB(child_position, half_extents)
-			var new_child := QuadtreeChunk.new(normal, binormal, tangent, child_bounds, depth+1, max_chunk_depth)
-			
+			var new_child := QuadtreeChunk.new(
+				normal,
+				binormal,
+				tangent,
+				child_bounds,
+				depth+1,
+				min_chunk_depth,
+				max_chunk_depth
+			)
+
 			# Threshold needs to be in chord-distance units on unit sphere
 			# We multiply by local_size.x to ensure that
 			# larger chunks have a larger threshold, otherwise
@@ -230,27 +252,50 @@ class QuadtreeChunk :
 			# to the same degree.
 			var threshold := local_size.x * 2.0
 			children.append(new_child)
-			if depth < 0 or (depth < max_chunk_depth and distance < threshold):
+			if depth < min_chunk_depth  or (depth < max_chunk_depth and distance < threshold):
 				new_child.subdivide(focus_point)
-	
+			
+			# We want a parent chunk's identifier to include it's children's identifiers
+			# so we can  know if we need to discard a mesh becuase it's children changed.
+			identifier = identifier + " " + new_child.identifier
+
 func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
+	if quadtree_chunk.depth < chunk_resolution:
+		# Keep going until we are at the chunk resolution
+		for child in quadtree_chunk.children:
+			visualize_quadtree(child)
+		return
+
+	# Mark this chunk as being drawn this render.
+	current_chunks_lookup[quadtree_chunk.identifier] = true
+	
+	# If we've already have a mesh for this chunk, don't create a new one.
+	if chunks_lookup.has(quadtree_chunk.identifier):
+		return
+	# Create a single mesh instance for this chunk, including all of it's children.
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array()
+	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array()
+	
+	construct_chunk_mesh(quadtree_chunk, arrays)
+	
+	var array_mesh := ArrayMesh.new()
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.mesh = array_mesh
+	chunks_lookup[quadtree_chunk.identifier] = mesh_instance
+	add_child(mesh_instance)
+
+func construct_chunk_mesh(quadtree_chunk : QuadtreeChunk, arrays: Array) -> void:
 	# If this chunk has children, we only want to render the children
 	# as they make up the geometry of the parent chunk.
 	if quadtree_chunk.children:
 		for child in quadtree_chunk.children:
-			visualize_quadtree(child)
+			construct_chunk_mesh(child, arrays)
 		return
-		
-	# Here we mark this chunk as rendered this frame
-	current_chunks_lookup[quadtree_chunk.identifier] = true
-	
-	# If we already have a mesh instance of this chunk,
-	# then don't need to re-create it.
-	if chunks_lookup.has(quadtree_chunk.identifier):
-		return
-	
-	# At this point, the chunk has no children and we do not have a
-	# mesh instance for it yet, so we create one.
+
+	var index_offset := (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
 	var binormal := quadtree_chunk.binormal
 	var tangent := quadtree_chunk.tangent
 	var pos := quadtree_chunk.bounds.position
@@ -271,29 +316,20 @@ func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
 	#        Triangle 1: v0 → v1 → v2
 	#        Triangle 2: v0 → v2 → v3
 	#
+	# Normalizing the vectors curves the plane so the planes form a sphere,
+	# then halfing it so the sphere has a diameter of 1 meter.
+	#
 	var verts := PackedVector3Array([
-		pos,
-		pos + size_y,
-		pos + size_x + size_y,
-		pos + size_x,
+		pos.normalized() * 0.5,
+		(pos + size_y).normalized() * 0.5,
+		(pos + size_x + size_y).normalized() * 0.5,
+		(pos + size_x).normalized() * 0.5,
 	])
 	
 	var indicies := PackedInt32Array([
-		0,1,2, # First triangle
-		0,2,3, # Second triangle
+		index_offset, index_offset + 1, index_offset + 2, # First triangle
+		index_offset, index_offset + 2, index_offset + 3, # Second triangle
 	])
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_INDEX] = indicies
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	
-	# We are creating a single mesh instance for each plane.
-	# This is very ineficient as it results in many draw calls.
-	# We will use MultiMeshInstance3D in the near future.
-	var mi := MeshInstance3D.new()
-	mi.set_mesh(mesh)
-	mi.material_override = material
-	add_child(mi)
-	chunks_lookup[quadtree_chunk.identifier] = mi
+
+	arrays[Mesh.ARRAY_VERTEX] = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array) + verts
+	arrays[Mesh.ARRAY_INDEX] = (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array) + indicies
