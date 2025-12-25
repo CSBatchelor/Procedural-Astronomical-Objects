@@ -264,6 +264,7 @@ func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array()
+	arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array()
 	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array()
 	
 	var vertex_lookup : Dictionary[Vector3, int] = {}
@@ -339,6 +340,7 @@ func construct_chunk_mesh(
 	#   Without lookup, we'd create it 4 times. With lookup, just once.
 	#
 	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
 	for vert in needed_verts:
 		if vertex_lookup.has(vert):
 			continue
@@ -346,6 +348,7 @@ func construct_chunk_mesh(
 		vertex_lookup[vert] = index_offset
 		index_offset += 1 
 		verts.append(vert)
+		norms.append(vert.normalized())
 	
 	var indicies := PackedInt32Array([
 		# First triangle
@@ -360,4 +363,5 @@ func construct_chunk_mesh(
 	])
 
 	arrays[Mesh.ARRAY_VERTEX] = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array) + verts
+	arrays[Mesh.ARRAY_NORMAL] = (arrays[Mesh.ARRAY_NORMAL] as PackedVector3Array) + norms
 	arrays[Mesh.ARRAY_INDEX] = (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array) + indicies
