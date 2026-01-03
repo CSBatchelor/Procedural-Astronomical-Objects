@@ -46,50 +46,57 @@ func regenerate_meshes() -> void:
 			mi.queue_free()
 	
 func generate_cube() -> void:
-	# Generate 6 faces of a cube, one plane per face:
-	#
-	#                       +Y (UP)
-	#                         │
-	#                         │       ╱ +Z (BACK)
-	#                         │      ╱
-	#                  ┌──────┼─────╱───┐
-	#                 ╱│      │    ╱   ╱│
-	#                ╱ │      │   ╱   ╱ │
-	#               ┌──┼──────┼──╱───┐  │
-	#               │  │      │ ╱    │  │
-	#               │  │      │╱     │  │
-	#   -X (LEFT) ──┼──┼──────●──────┼──┼── +X (RIGHT)
-	#               │  │     ╱│      │  │
-	#               │  └────╱─┼──────┼──┘
-	#               │      ╱  │      │ ╱
-	#               │     ╱   │      │╱
-	#               └────╱────┼──────┘
-	#                   ╱     │
-	#             -Z   ╱      │
-	#          (FORWARD)      │
-	#                        -Y (DOWN)
-	#
-	#   Face        Normal Direction
-	#   ─────       ────────────────
-	#   UP          +Y  ( 0,  1,  0)
-	#   DOWN        -Y  ( 0, -1,  0)
-	#   LEFT        -X  (-1,  0,  0)
-	#   RIGHT       +X  ( 1,  0,  0)
-	#   FORWARD     -Z  ( 0,  0, -1)
-	#   BACK        +Z  ( 0,  0,  1)
-	#
-	var sides := PackedVector3Array([
-		Vector3.UP,
-		Vector3.DOWN,
-		Vector3.LEFT,
-		Vector3.RIGHT,
-		Vector3.FORWARD,
-		Vector3.BACK
-	])
-	for normal in sides:
-		generate_quadtree_plane(normal)
+	var quadtree_cube := QuadtreeCube.new(data.base_resolution, data.max_resolution, data.focus_point)
+	quadtree_cube.generate()
+	for face in QuadtreeCube.faces.values():
+		var quadtree_chunk := quadtree_cube.face_quadtrees[face]
+		visualize_quadtree(quadtree_chunk)
 
-func generate_quadtree_plane(normal := Vector3.ZERO) -> void:
+class QuadtreeCube :
+	## A cube with 6 faces, each face represented as a quadtree for LOD subdivision:
+	##
+	##                       +Y (UP)
+	##                         │
+	##                         │       ╱ +Z (BACK)
+	##                         │      ╱
+	##                  ┌──────┼─────╱───┐
+	##                 ╱│      │    ╱   ╱│
+	##                ╱ │      │   ╱   ╱ │
+	##               ┌──┼──────┼──╱───┐  │
+	##               │  │      │ ╱    │  │
+	##               │  │      │╱     │  │
+	##   -X (LEFT) ──┼──┼──────●──────┼──┼── +X (RIGHT)
+	##               │  │     ╱│      │  │
+	##               │  └────╱─┼──────┼──┘
+	##               │      ╱  │      │ ╱
+	##               │     ╱   │      │╱
+	##               └────╱────┼──────┘
+	##                   ╱     │
+	##             -Z   ╱      │
+	##          (FORWARD)      │
+	##                        -Y (DOWN)
+	##
+	##   Face        Normal Direction
+	##   ─────       ────────────────
+	##   UP          +Y  ( 0,  1,  0)
+	##   DOWN        -Y  ( 0, -1,  0)
+	##   LEFT        -X  (-1,  0,  0)
+	##   RIGHT       +X  ( 1,  0,  0)
+	##   FORWARD     -Z  ( 0,  0, -1)
+	##   BACK        +Z  ( 0,  0,  1)
+	##
+	
+	enum faces {
+		UP,
+		DOWN,
+		LEFT,
+		RIGHT,
+		FRONT,
+		BACK
+	}
+
+	static var _initialized := false
+	
 	# These three vectors form an orthonormal basis (local coordinate system) for each face:
 	#   - Normal:   Points outward from the face (perpendicular to surface)
 	#   - Binormal: Lies on the face, acts as the local "X" axis
@@ -107,29 +114,104 @@ func generate_quadtree_plane(normal := Vector3.ZERO) -> void:
 	#
 	# Together, binormal and tangent allow mapping 2D grid coordinates into 3D space
 	# using: pos_3d = binormal * x + tangent * y
-	var binormal := Vector3(normal.z, normal.x, normal.y)
-	var tangent := binormal.rotated(normal, PI / 2.0)
-	# Position is bottom-left corner of the plane
-	# Dividing by 2 ensures the cube will be centered
-	var pos := normal/2 - binormal/2 - tangent/2
-	var size := normal/2 + binormal + tangent
-	var bounds := AABB(pos, size)
-	var starting_depth := 0
-	var min_depth := data.base_resolution
-	var max_depth := data.max_resolution
-	var quadtree_chunk := QuadtreeChunk.new(
-		normal,
-		binormal,
-		tangent,
-		bounds,
-		starting_depth,
-		min_depth,
-		max_depth
-	)
+	const face_normals: Dictionary[int, Vector3] = {
+		faces.UP: Vector3.UP,
+		faces.DOWN: Vector3.DOWN,
+		faces.LEFT: Vector3.LEFT,
+		faces.RIGHT: Vector3.RIGHT,
+		faces.FRONT: Vector3.FORWARD,
+		faces.BACK: Vector3.BACK
+	}
+
+	# Computed in _static_init() using: Vector3(normal.z, normal.x, normal.y)
+
+	static var face_binormals: Dictionary[int, Vector3] = {}
 	
-	quadtree_chunk.subdivide(data.focus_point)
+	# Computed in _static_init() using: binormal.rotated(normal, PI / 2.0)
+	static var face_tangents: Dictionary[int, Vector3] = {}
+
+	# The bottom-left corner position of each face's plane.
+	# Computed in _static_init() using: normal/2 - binormal/2 - tangent/2
+	#
+	#   Example for UP face (looking down at it from above):
+	#
+	#                   -Z (tangent direction)
+	#                       ↑
+	#                  ┌────┼────┐
+	#                  │    │    │
+	#       -X ────────┼────●────┼──────── +X (binormal)
+	#                  │  center │
+	#         corner → ●────┼────┘
+	#                       ↓
+	#                      +Z
+	#
+	static var face_positions: Dictionary[int, Vector3] = {}
+
+	# The size of each face's bounding box.
+	# Computed in _static_init() using: normal/2 + binormal + tangent
+	static var face_sizes: Dictionary[int, Vector3] = {}
+
+	# The AABB bounds for each face.
+	# Computed in _static_init() using: AABB(face_positions[face], face_sizes[face])
+	static var face_bounds: Dictionary[int, AABB] = {}
+
+	static func _static_init() -> void:
+		if _initialized:
+			return
+		_initialized = true
+		# Reset dictionaries in case they were made read-only in a previous editor session
+		face_binormals = {}
+		face_tangents = {}
+		face_positions = {}
+		face_sizes = {}
+		face_bounds = {}
+		for face in faces.values():
+			var normal := face_normals[face]
+			# Cyclic permutation creates a perpendicular vector on the face
+			var binormal := Vector3(normal.z, normal.x, normal.y)
+			# Rotate 90° around normal to get the other perpendicular axis
+			var tangent := binormal.rotated(normal, PI / 2.0)
+			
+			face_binormals[face] = binormal
+			face_tangents[face] = tangent
+			face_positions[face] = normal/2 - binormal/2 - tangent/2
+			face_sizes[face] = normal/2 + binormal + tangent
+			face_bounds[face] = AABB(face_positions[face], face_sizes[face])
+		
+		face_normals.make_read_only()
+		face_binormals.make_read_only()
+		face_tangents.make_read_only()
+		face_positions.make_read_only()
+		face_sizes.make_read_only()
+		face_bounds.make_read_only()
+
+	var min_depth : int
+	var max_depth : int
+	var focus_point : Vector3
+	var face_quadtrees : Dictionary[int, QuadtreeChunk] = {}
+
+	func _init(_min_depth : int, _max_depth : int, _focus_point : Vector3) -> void:
+		min_depth = _min_depth
+		max_depth = _max_depth
+		focus_point = _focus_point
 	
-	visualize_quadtree(quadtree_chunk)
+	func generate() -> void:
+		for face in faces.values():
+			_generate_face(face)
+	
+	func _generate_face(face : int) -> void:
+		var quadtree_chunk := QuadtreeChunk.new(
+			face_normals[face],
+			face_binormals[face],
+			face_tangents[face],
+			face_bounds[face],
+			0,
+			min_depth,
+			max_depth,
+			"%s-" % [face]
+		)
+		quadtree_chunk.subdivide(focus_point)
+		face_quadtrees[face] = quadtree_chunk
 
 class QuadtreeChunk :
 	## A quadtree is a tree where each node has exactly 0 or 4 children.
@@ -162,6 +244,7 @@ class QuadtreeChunk :
 	var min_chunk_depth : int
 	var max_chunk_depth : int
 	var identifier : String
+	var location_code : String
 	
 	func _init(
 		_normal : Vector3,
@@ -170,7 +253,8 @@ class QuadtreeChunk :
 		_bounds : AABB,
 		_depth : int,
 		_min_chunk_depth : int,
-		_max_chunk_depth : int
+		_max_chunk_depth : int,
+		_location_code : String = ""
 	) -> void:
 		normal = _normal
 		binormal = _binormal
@@ -180,6 +264,7 @@ class QuadtreeChunk :
 		min_chunk_depth = _min_chunk_depth
 		max_chunk_depth = _max_chunk_depth
 		identifier = generate_identifier()
+		location_code = _location_code
 		
 	func generate_identifier() -> String:
 		return "%s_%s_%s_%d" % [normal, bounds.position, bounds.size, depth]
@@ -219,7 +304,8 @@ class QuadtreeChunk :
 			bounds.position + tangent * half_size,                        # top-right
 		]
 		
-		for child_position in child_positions:
+		for i in child_positions.size():
+			var child_position := child_positions[i]
 			var child_center_3d := child_position + binormal * quarter_size + tangent * quarter_size
 			var distance := child_center_3d.normalized().distance_to(focus_point)
 			var child_bounds := AABB(child_position, half_extents)
@@ -230,7 +316,8 @@ class QuadtreeChunk :
 				child_bounds,
 				depth+1,
 				min_chunk_depth,
-				max_chunk_depth
+				max_chunk_depth,
+				location_code + "%s" % [i]
 			)
 
 			# Threshold needs to be in chord-distance units on unit sphere
