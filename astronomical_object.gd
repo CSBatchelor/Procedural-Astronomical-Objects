@@ -361,6 +361,16 @@ class QuadtreeChunk :
 				return "%s" % ["".join(neighbor_path)]
 		return ""
 
+	func is_ancestor_of(quadtree_chunk : QuadtreeChunk) -> bool:
+		if self == quadtree_chunk:
+			return true
+
+		for child in children:
+			if child.is_ancestor_of(quadtree_chunk):
+				return true
+
+		return false
+
 	func subdivide(focus_point : Vector3) -> void:
 		# Subdivides this chunk into 4 child quadrants:
 		#
