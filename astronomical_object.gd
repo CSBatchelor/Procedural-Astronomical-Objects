@@ -207,8 +207,7 @@ class QuadtreeCube :
 			face_bounds[face],
 			0,
 			min_depth,
-			max_depth,
-			"%s-" % [face]
+			max_depth
 		)
 		quadtree_chunk.subdivide(focus_point)
 		face_quadtrees[face] = quadtree_chunk
@@ -235,6 +234,59 @@ class QuadtreeChunk :
 	## We use a quadtree to subdivide the cube into smaller chunks,
 	## increasing the detail of the mesh where the focus point is.
 	##
+
+	enum Quadrant {
+		BOTTOM_LEFT,
+		BOTTOM_RIGHT,
+		TOP_LEFT,
+		TOP_RIGHT
+	}
+
+	enum Direction {
+		UP,
+		DOWN,
+		LEFT,
+		RIGHT
+	}
+
+	enum Action {
+		HALT,
+		CONTINUE
+	}
+
+	static var _initialized := false
+	static var neighbor_fsm := {
+		Direction.UP: {
+			Quadrant.BOTTOM_LEFT: { "quadrant": Quadrant.TOP_LEFT, "action": Action.HALT },
+			Quadrant.BOTTOM_RIGHT: { "quadrant": Quadrant.TOP_RIGHT, "action": Action.HALT },
+			Quadrant.TOP_LEFT: { "quadrant": Quadrant.BOTTOM_LEFT, "action": Action.CONTINUE },
+			Quadrant.TOP_RIGHT: { "quadrant": Quadrant.BOTTOM_RIGHT, "action": Action.CONTINUE }
+		},
+		Direction.DOWN: {
+			Quadrant.BOTTOM_LEFT: { "quadrant": Quadrant.TOP_LEFT, "action": Action.CONTINUE },
+			Quadrant.BOTTOM_RIGHT: { "quadrant": Quadrant.TOP_RIGHT, "action": Action.CONTINUE },
+			Quadrant.TOP_LEFT: { "quadrant": Quadrant.BOTTOM_LEFT, "action": Action.HALT },
+			Quadrant.TOP_RIGHT: { "quadrant": Quadrant.BOTTOM_RIGHT, "action": Action.HALT }
+		},
+		Direction.LEFT: {
+			Quadrant.BOTTOM_LEFT: { "quadrant": Quadrant.BOTTOM_RIGHT, "action": Action.CONTINUE },
+			Quadrant.BOTTOM_RIGHT: { "quadrant": Quadrant.BOTTOM_LEFT, "action": Action.HALT },
+			Quadrant.TOP_LEFT: { "quadrant": Quadrant.TOP_RIGHT, "action": Action.CONTINUE },
+			Quadrant.TOP_RIGHT: { "quadrant": Quadrant.TOP_LEFT, "action": Action.HALT }
+		},
+		Direction.RIGHT: {
+			Quadrant.BOTTOM_LEFT: { "quadrant": Quadrant.BOTTOM_RIGHT, "action": Action.HALT },
+			Quadrant.BOTTOM_RIGHT: { "quadrant": Quadrant.BOTTOM_LEFT, "action": Action.CONTINUE },
+			Quadrant.TOP_LEFT: { "quadrant": Quadrant.TOP_RIGHT, "action": Action.HALT },
+			Quadrant.TOP_RIGHT: { "quadrant": Quadrant.TOP_LEFT, "action": Action.CONTINUE }
+		}
+	}
+	static func _static_init() -> void:
+		if _initialized:
+			return
+		
+		neighbor_fsm.make_read_only()
+
 	var normal : Vector3
 	var binormal : Vector3
 	var tangent : Vector3
@@ -269,6 +321,46 @@ class QuadtreeChunk :
 	func generate_identifier() -> String:
 		return "%s_%s_%s_%d" % [normal, bounds.position, bounds.size, depth]
 		
+	# Finds the location code of a neighboring chunk in the given direction.
+	# Returns "" if the neighbor is outside this quadtree.
+	#
+	# Quadrant layout:
+	#   ┌───┬───┐
+	#   │ 2 │ 3 │
+	#   ├───┼───┤
+	#   │ 0 │ 1 │
+	#   └───┴───┘
+	#
+	# Algorithm: Walk backwards through the location code (deepest to root).
+	# For each digit, the FSM either HALTs (neighbor found) or CONTINUEs (crossed boundary).
+	#
+	# Example: LEFT from "321" → "320"
+	#   Process "1": LEFT from quadrant 1 → quadrant 0, HALT (sibling found)
+	#   Result: "320"
+	#
+	# Example: LEFT from "30" → "21"
+	#   Process "0": LEFT from quadrant 0 → quadrant 1, CONTINUE (crossed boundary)
+	#   Process "3": LEFT from quadrant 3 → quadrant 2, HALT
+	#   Result: "21"
+	#
+	# Example: LEFT from "020" → "" (no neighbor)
+	#   Process "0": CONTINUE
+	#   Process "2": CONTINUE
+	#   Process "0": CONTINUE (would exit quadtree)
+	#   Result: "" (no neighbor exists)
+	func get_neighbor_location_code(direction : Direction) -> String:
+		var chunk_path := location_code.split()
+		var neighbor_path := chunk_path.duplicate()
+		for i in range(neighbor_path.size()-1 , -1, -1):
+			var quadrant := neighbor_path[i] as int
+			var entry := neighbor_fsm[direction][quadrant] as Dictionary
+			var new_quadrant := entry["quadrant"] as int
+			var action := entry["action"] as int
+			neighbor_path[i] = str(new_quadrant)
+			if action == Action.HALT:
+				return "%s" % ["".join(neighbor_path)]
+		return ""
+
 	func subdivide(focus_point : Vector3) -> void:
 		# Subdivides this chunk into 4 child quadrants:
 		#
