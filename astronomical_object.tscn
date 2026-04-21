@@ -6,7 +6,10 @@
 [sub_resource type="Resource" id="Resource_rfh0j"]
 script = ExtResource("2_odng8")
 chunk_resolution = 0
+base_resolution = 0
+max_resolution = 0
 focus_point = Vector3(0.57735026, 0.57735026, 0.57735026)
+highlight_location = "0-0"
 metadata/_custom_type_script = "uid://cjdi48ewc8mbw"
 
 [node name="AstronomicalObject" type="Node3D"]

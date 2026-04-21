@@ -50,7 +50,7 @@ func generate_cube() -> void:
 	quadtree_cube.generate()
 	for face in QuadtreeCube.faces.values():
 		var quadtree_chunk := quadtree_cube.face_quadtrees[face]
-		visualize_quadtree(quadtree_chunk)
+		visualize_quadtree(quadtree_cube, quadtree_chunk)
 
 class QuadtreeCube :
 	## A cube with 6 faces, each face represented as a quadtree for LOD subdivision:
@@ -155,6 +155,45 @@ class QuadtreeCube :
 	# Computed in _static_init() using: AABB(face_positions[face], face_sizes[face])
 	static var face_bounds: Dictionary[int, AABB] = {}
 
+	# Flattened cube (cube net) - each face divided into quadrants:
+	#
+	# ↕ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕   ↕ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕
+	# ↕                         ↕   ↕                         ↕
+	# ↕                       ┌───┬───┐                       ↕
+	# ↕             ↕ ↔ ↔ ↔ ↔ │ 0 │ 2 │ ↔ ↔ ↔ ↔ ↕             ↕
+	# ↕             ↕         ├───┼───┤         ↕             ↕
+	# ↕             ↕   ↔ ↔ ↔ │ 1 │ 3 │ ↔ ↔ ↔   ↕             ↕
+	# ↕             ↕   ↕     └───┴───┘     ↕   ↕             ↕
+	# ↕             ↕   ↕      (FRONT)      ↕   ↕             ↕
+	# ↕             ↕   ↕       ↕   ↕       ↕   ↕             ↕
+	# ↕           ┌───┬───┐   ┌───┬───┐   ┌───┬───┐           ↕
+	# ↕   ↕ ↔ ↔ ↔ │ 0 │ 2 │ ↔ │ 2 │ 3 │ ↔ │ 3 │ 1 │ ↔ ↔ ↔ ↕   ↕
+	# ↕   ↕       ├───┼───┤   ├───┼───┤   ├───┼───┤       ↕   ↕
+	# ↕   ↕   ↔ ↔ │ 1 │ 3 │ ↔ │ 0 │ 1 │ ↔ │ 2 │ 0 │ ↔ ↔   ↕   ↕
+	# ↕   ↕   ↕   └───┴───┘   └───┴───┘   └───┴───┘   ↕   ↕   ↕
+	# ↕   ↕   ↕    (LEFT)        (UP)      (RIGHT)    ↕   ↕   ↕
+	# ↕   ↕   ↕     ↕   ↕       ↕   ↕       ↕   ↕     ↕   ↕   ↕
+	# ↕   ↕   ↕     ↕   ↕     ┌───┬───┐     ↕   ↕     ↕   ↕   ↕
+	# ↕   ↕   ↕     ↕   ↕ ↔ ↔ │ 0 │ 2 │ ↔ ↔ ↕   ↕     ↕   ↕   ↕
+	# ↕   ↕   ↕     ↕         ├───┼───┤         ↕     ↕   ↕   ↕
+	# ↕   ↕   ↕     ↕ ↔ ↔ ↔ ↔ │ 1 │ 3 │ ↔ ↔ ↔ ↔ ↕     ↕   ↕   ↕
+	# ↕   ↕   ↕               └───┴───┘               ↕   ↕   ↕
+	# ↕   ↕   ↕                (BACK)                 ↕   ↕   ↕
+	# ↕   ↕   ↕                 ↕   ↕                 ↕   ↕   ↕
+	# ↕   ↕   ↕               ┌───┬───┐               ↕   ↕   ↕
+	# ↕   ↕   ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ │ 1 │ 0 │ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕   ↕   ↕
+	# ↕   ↕                   ├───┼───┤                   ↕   ↕
+	# ↕   ↕ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ │ 3 │ 2 │ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕   ↕
+	# ↕                       └───┴───┘                       ↕
+	# ↕                        (DOWN)                         ↕
+	# ↕                         ↕   ↕                         ↕
+	# ↕ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕   ↕ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕
+	static var cross_face_fsm := {
+		QuadtreeChunk.Direction.UP: {
+			faces.BACK: { "face": faces.UP, "translations": [0, 1, 2, 3]}
+		}
+	}
+
 	static func _static_init() -> void:
 		if _initialized:
 			return
@@ -211,6 +250,14 @@ class QuadtreeCube :
 		)
 		quadtree_chunk.subdivide(focus_point)
 		face_quadtrees[face] = quadtree_chunk
+	
+	func _get_location_code(chunk : QuadtreeChunk) -> String:
+		var face_code : String = ""
+		for face in faces.values():
+			if face_quadtrees[face].is_ancestor_of(chunk):
+				face_code = str(face)
+				break
+		return "%s-%s" % [face_code, chunk.location_code]
 
 class QuadtreeChunk :
 	## A quadtree is a tree where each node has exactly 0 or 4 children.
@@ -402,8 +449,8 @@ class QuadtreeChunk :
 		var child_positions : Array[Vector3] = [
 			bounds.position,                                              # bottom-left
 			bounds.position + binormal * half_size,                       # bottom-right
-			bounds.position + tangent * half_size + binormal * half_size, # top-left
-			bounds.position + tangent * half_size,                        # top-right
+			bounds.position + tangent * half_size,                        # top-left
+			bounds.position + tangent * half_size + binormal * half_size, # top-right
 		]
 		
 		for i in child_positions.size():
@@ -436,11 +483,11 @@ class QuadtreeChunk :
 			# so we can  know if we need to discard a mesh becuase it's children changed.
 			identifier = identifier + " " + new_child.identifier
 
-func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
+func visualize_quadtree(quadtree_cube : QuadtreeCube, quadtree_chunk : QuadtreeChunk) -> void:
 	if quadtree_chunk.depth < data.chunk_resolution:
 		# Keep going until we are at the chunk resolution
 		for child in quadtree_chunk.children:
-			visualize_quadtree(child)
+			visualize_quadtree(quadtree_cube, child)
 		return
 
 	# Mark this chunk as being drawn this render.
@@ -455,19 +502,22 @@ func visualize_quadtree(quadtree_chunk : QuadtreeChunk) -> void:
 	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array()
 	arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array()
 	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array()
-	
+	arrays[Mesh.ARRAY_CUSTOM0] = PackedFloat32Array()
 	var vertex_lookup : Dictionary[Vector3, int] = {}
 	
-	construct_chunk_mesh(quadtree_chunk, arrays, vertex_lookup)
+	construct_chunk_mesh(quadtree_cube, quadtree_chunk, arrays, vertex_lookup)
 	
 	var array_mesh := ArrayMesh.new()
-	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var format_flags := Mesh.ARRAY_CUSTOM_R_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, format_flags)
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = array_mesh
+	mesh_instance.material_override = material
 	chunks_lookup[quadtree_chunk.identifier] = mesh_instance
 	add_child(mesh_instance)
 
 func construct_chunk_mesh(
+	quadtree_cube : QuadtreeCube,
 	quadtree_chunk : QuadtreeChunk,
 	arrays: Array,
 	vertex_lookup : Dictionary[Vector3, int]
@@ -476,9 +526,10 @@ func construct_chunk_mesh(
 	# as they make up the geometry of the parent chunk.
 	if quadtree_chunk.children:
 		for child in quadtree_chunk.children:
-			construct_chunk_mesh(child, arrays, vertex_lookup)
+			construct_chunk_mesh(quadtree_cube, child, arrays, vertex_lookup)
 		return
 
+	var should_highlight := data.highlight_location == quadtree_cube._get_location_code(quadtree_chunk)
 	var index_offset := (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
 	var binormal := quadtree_chunk.binormal
 	var tangent := quadtree_chunk.tangent
@@ -530,14 +581,16 @@ func construct_chunk_mesh(
 	#
 	var verts := PackedVector3Array()
 	var norms := PackedVector3Array()
+	var custom0 := PackedFloat32Array()
 	for vert in needed_verts:
-		if vertex_lookup.has(vert):
+		if not should_highlight and vertex_lookup.has(vert):
 			continue
 		
 		vertex_lookup[vert] = index_offset
 		index_offset += 1 
 		verts.append(vert)
 		norms.append(vert.normalized())
+		custom0.append(float(should_highlight))
 	
 	var indicies := PackedInt32Array([
 		# First triangle
@@ -554,3 +607,4 @@ func construct_chunk_mesh(
 	arrays[Mesh.ARRAY_VERTEX] = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array) + verts
 	arrays[Mesh.ARRAY_NORMAL] = (arrays[Mesh.ARRAY_NORMAL] as PackedVector3Array) + norms
 	arrays[Mesh.ARRAY_INDEX] = (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array) + indicies
+	arrays[Mesh.ARRAY_CUSTOM0] = (arrays[Mesh.ARRAY_CUSTOM0] as PackedFloat32Array) + custom0

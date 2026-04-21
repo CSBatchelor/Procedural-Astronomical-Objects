@@ -41,3 +41,8 @@ class_name AstronomicalObjectData
 	set(value):
 		focus_point = value.normalized()
 		emit_changed()
+
+@export var highlight_location := "" :
+	set(value):
+		highlight_location = value
+		emit_changed()
