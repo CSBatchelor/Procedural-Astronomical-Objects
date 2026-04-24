@@ -190,8 +190,37 @@ class QuadtreeCube :
 	# ↕ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕   ↕ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↔ ↕
 	static var cross_face_fsm := {
 		QuadtreeChunk.Direction.UP: {
-			faces.BACK: { "face": faces.UP, "translations": [0, 1, 2, 3]}
-		}
+			faces.FRONT: {"face": faces.RIGHT, "translations": [null, null, 1, 3]},
+			faces.LEFT:  {"face": faces.UP,    "translations": [null, null, 2, 0]},
+			faces.UP:    {"face": faces.FRONT, "translations": [null, null, 1, 3]},
+			faces.RIGHT: {"face": faces.UP,    "translations": [null, null, 1, 3]},
+			faces.BACK:  {"face": faces.RIGHT, "translations": [null, null, 2, 0]},
+			faces.DOWN:  {"face": faces.FRONT, "translations": [null, null, 2, 0]}
+		},
+		QuadtreeChunk.Direction.DOWN: {
+			faces.FRONT: {"face": faces.LEFT, "translations": [0, 2, null, null]},
+			faces.LEFT:  {"face": faces.DOWN, "translations": [3, 1, null, null]},
+			faces.UP:    {"face": faces.BACK, "translations": [0, 2, null, null]},
+			faces.RIGHT: {"face": faces.DOWN, "translations": [0, 2, null, null]},
+			faces.BACK:  {"face": faces.LEFT, "translations": [3, 1, null, null]},
+			faces.DOWN:  {"face": faces.BACK, "translations": [3, 1, null, null]}
+		},
+		QuadtreeChunk.Direction.LEFT: {
+			faces.FRONT: {"face": faces.DOWN,  "translations": [3, null, 2, null]},
+			faces.LEFT:  {"face": faces.FRONT, "translations": [0, null, 1, null]},
+			faces.UP:    {"face": faces.LEFT,  "translations": [3, null, 2, null]},
+			faces.RIGHT: {"face": faces.BACK,  "translations": [3, null, 2, null]},
+			faces.BACK:  {"face": faces.UP,    "translations": [0, null, 1, null]},
+			faces.DOWN:  {"face": faces.RIGHT, "translations": [0, null, 1, null]}
+		},
+		QuadtreeChunk.Direction.RIGHT: {
+			faces.FRONT: {"face": faces.UP,    "translations": [null, 2, null, 3]},
+			faces.LEFT:  {"face": faces.BACK,  "translations": [null, 1, null, 0]},
+			faces.UP:    {"face": faces.RIGHT, "translations": [null, 2, null, 3]},
+			faces.RIGHT: {"face": faces.FRONT, "translations": [null, 2, null, 3]},
+			faces.BACK:  {"face": faces.DOWN,  "translations": [null, 1, null, 0]},
+			faces.DOWN:  {"face": faces.LEFT,  "translations": [null, 1, null, 0]}
+		},
 	}
 
 	static func _static_init() -> void:
